@@ -1,37 +1,56 @@
-function TorusPlot(X::T, Y::T, Z::T, M::Manifolds.EmbeddedTorus) where {T<:AbstractArray}
-    @assert Plots.backend() == Plots.PlotlyBackend() "Plotly() is not enabled"
 
-    ϑ = LinRange(-pi, pi, 100)
-    φ = LinRange(-pi, pi, 100)
-    pts = [Manifolds._torus_param(M, θ, ϕ) for θ in ϑ, ϕ in φ]
-    x, y, z = map(a -> a[1], pts), map(a -> a[2], pts), map(a -> a[3], pts)
+"""
+    torus_figure()
 
-
-    rng = M.R+M.r
-    Plots.surface(x,y,z,
-                    acis = true,
-                    alpha= 0.5,
-                    legend = false,
-                    color = :grey,
-                    xlim = (-rng-1, rng+1),
-                    ylim = (-rng-1, rng+1),
-                    zlim = (-M.r-1, M.r+1)
-                    )
-    
-    Plots.plot!(X,Y,Z,
-                    axis = true,
-                    linewidth = 2.5,
-                    color = palette(:default)[1],
-                    legend = false,
-                    xlabel = "x",
-                    ylabel = "y",
-                    zlabel = "z")
+This function generates a simple plot of a torus and returns the new figure containing the plot.
+"""
+function torus_figure(M::Manifolds.EmbeddedTorus)
+    fig = Figure(resolution=(2000, 1600), size = (1200,1200), fontsize=46)
+    ax = LScene(fig[1, 1], show_axis=false)
+    ϴs, φs = LinRange(-π, π, 50), LinRange(-π, π, 50)
+    param_points = [Manifolds._torus_param(M, θ, φ) for θ in ϴs, φ in φs]
+    X1, Y1, Z1 = [[p[i] for p in param_points] for i in 1:3]
+    gcs = [gaussian_curvature(M, p) for p in param_points]
+    gcs_mm = max(abs(minimum(gcs)), abs(maximum(gcs)))
+    pltobj = Makie.surface!(
+        ax,
+        X1,
+        Y1,
+        Z1;
+        shading=true,
+        ambient=Vec3f(0.65, 0.65, 0.65),
+        backlight=1.0f0,
+        color=gcs,
+        colormap=Reverse(:RdBu),
+        colorrange=(-gcs_mm, gcs_mm),
+        transparency=true,
+    )
+    Makie.wireframe!(ax, X1, Y1, Z1; transparency=true, color=:gray, linewidth=0.5)
+    # zoom!(ax.scene, cameracontrols(ax.scene), 0.98)
+    #Colorbar(fig[1, 2], pltobj, height=Relative(0.5), label="Gaussian curvature")
+    return ax, fig
 end
 
-
-function TorusPlot(X::SamplePath{T},  M::Manifolds.EmbeddedTorus) where {T}
-    X1 = extractcomp(X.yy,1)
-    X2 = extractcomp(X.yy,2)
-    X3 = extractcomp(X.yy,3)
-    TorusPlot(X1, X2, X3, M)
+function sphere_figure()
+    fig = Figure(resolution=(2000, 1600), size = (1200,1200), fontsize=46)
+    ax = LScene(fig[1, 1], show_axis=false)
+    ϴs, φs = LinRange(0.0, 2π, 50), LinRange(0.0, π, 50)
+    param_points = [[sin(θ)*cos(φ), sin(θ)*sin(φ), cos(θ)] for θ in ϴs, φ in φs]
+    X1, Y1, Z1 = [[p[i] for p in param_points] for i in 1:3]
+    pltobj = Makie.surface!(
+        ax,
+        X1,
+        Y1,
+        Z1;
+        # shading=true,
+        ambient=Vec3f(0.65, 0.65, 0.65),
+        backlight=1.0f0,
+        colormap = :deep,
+        colorrange = (10,100),
+        transparency=true,
+    )
+    Makie.wireframe!(ax, X1, Y1, Z1; transparency=true, color=:gray, linewidth=0.5)
+    # zoom!(ax.scene, cameracontrols(ax.scene), 0.98)
+    #Colorbar(fig[1, 2], pltobj, height=Relative(0.5), label="Gaussian curvature")
+    return ax, fig
 end

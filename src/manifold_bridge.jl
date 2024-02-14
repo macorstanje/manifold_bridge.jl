@@ -1,23 +1,17 @@
-module manifold_bridge
-
-    using Plots
-    using ForwardDiff
-    using LinearAlgebra
-    using StaticArrays
-    using Einsum
-    using Bridge
-    using Manifolds
-
-    export TorusPlot
-
-    export frame, FrameBundle, Hor, SDESolver, Heun, IntegrateStep!
-    export StochasticDevelopment!, StochasticDevelopment
+using Manifolds
+using Plots
+using ForwardDiff
+using Bridge
+using StaticArrays
+using LinearAlgebra
+using Einsum
+using ProgressMeter
+using LegendrePolynomials
+using LaTeXStrings
+using GLMakie, Makie
 
 
-    include("basics.jl")
 
-    include("manifold_plots.jl")
+include("horizontal_development.jl")
 
-    include("horizontal_development.jl")
-
-end
+include("manifold_plots.jl")
