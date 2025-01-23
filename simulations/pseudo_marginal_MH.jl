@@ -155,7 +155,12 @@ Makie.save(outdir*"pseudo_marginal_MH_samples.png", fig)
 using DelimitedFiles
 writedlm(outdir*"pseudo_marginal_MH_samples_uniform_prior.csv",θ_array,',')
 
-
+W = sample(tt, Wiener{SVector{2, Float64}}())
+    # X1 = StochasticDevelopment(heun(), W, drift_multiple_obs(θ1, 1, obs), (x₀, ν), M, A)
+    # X20 = StochasticDevelopment(heun(), W, drift_multiple_obs(θ20, 20, obs), (x₀, ν), M, A)
+    # X1ᵒ = deepcopy(X1)
+    # X20ᵒ = deepcopy(X20)
+    X = StochasticDevelopment(heun(), W, drift_multiple_obs(θ₀, obs), (x₀, ν), M, A)
 GLMakie.activate!()
 fig = let
     ax, fig = torus_figure(M)

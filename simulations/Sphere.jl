@@ -2,6 +2,7 @@ include("/Users/marc/Documents/GitHub/manifold_bridge.jl/src/manifold_bridge.jl"
 GLMakie.activate!()
 using Random
 using Distributions
+outdir = "/Users/marc/Documents/Onderzoek/ManifoldGPs/"
 
 
 M = Manifolds.Sphere(2)
@@ -10,7 +11,7 @@ A = Manifolds.StereographicAtlas()
 ax1, fig1 = sphere_figure()
 # lines!(ax1, map(x -> x[1], xx), map(x -> x[2], xx) , map(x -> x[3], xx) ; linewidth = 2.0, color = :green)
 fig1
-Makie.save("sphere.png", fig1)
+# Makie.save("sphere.png", fig1)
 
 p = [0.0,0.0,1.0]
 i = Manifolds.get_chart_index(M, A,p)
@@ -20,31 +21,43 @@ N = p # normal vector
 
 a, Y = get_frame_parameterized(p,ν,M,B)
 
-function christoffel_symbols_second(M::Manifolds.Sphere, B::AbstractBasis, p)
-    Γ = zeros(2,2,2)
-    u,v = Manifolds.get_parameters(M, B.A, B.i, p)
-    den = 1+u^2+v^2
-    Γ[1,:,:] = (2/den) .* [-u -v ; -v u]
-    Γ[2,:,:] = (2/den) .* [v -u ; -u -v]
-    return Γ
-end
-
-function christoffel_symbols_second(M::Ellipsoid, B::AbstractBasis, p)
-    Γ = zeros(2,2,2)
-    u,v = Manifolds.get_parameters(M, B.A, B.i, p)
-    den = 1+u^2+v^2
-    Γ[1,:,:] = (2/den) .* [-u -v ; -v u]
-    Γ[2,:,:] = (2/den) .* [v -u ; -u -v]
-    return Γ
-end
+# function christoffel_symbols_second(M::Ellipsoid, B::AbstractBasis, p)
+#     Γ = zeros(2,2,2)
+#     u,v = Manifolds.get_parameters(M, B.A, B.i, p)
+#     den = 1+u^2+v^2
+#     Γ[1,:,:] = (2/den) .* [-u -v ; -v u]
+#     Γ[2,:,:] = (2/den) .* [v -u ; -u -v]
+#     return Γ
+# end
 
 
-tt = 0.0:0.001:100.0
+tt = 0.0:0.0001:1.0
 W = Bridge.sample(tt, Wiener{SVector{2, Float64}}())
 γ = deepcopy(W) ; for i in eachindex(γ.tt) γ.yy[i] = 1.0.*[γ.tt[i], 2*γ.tt[i]] end
 drift(M,B,t,a) = zeros(manifold_dimension(M))
 X = StochasticDevelopment(heun(), W, drift, (p, ν), M, A)
 xx = map(x -> x[1], X.yy)
+
+CairoMakie.activate!()
+fig = let 
+    fig = Figure( resolution=(2500, 2500), size = (1200,1200), fontsize=55)
+    ax1 = Axis(fig[1, 1] , xlabel = L"$x$", ylabel = L"$y$")
+    Makie.lines!(ax1, map(x -> x[1], W.yy), map(x -> x[2], W.yy), linewidth = 2.0, color = palette(:default)[1])
+    Makie.scatter!(W.yy[1], color = :red, markersize = 40)
+    fig
+end
+Makie.save(outdir*"BMR2.png", fig)
+
+GLMakie.activate!()
+fig = let
+    ax1, fig1 = sphere_figure()
+    lines!(ax1, map(x -> x[1], xx), map(x -> x[2], xx) , map(x -> x[3], xx) ; linewidth = 2.0, color = palette(:default)[1])
+    Makie.scatter!(SVector{3, Float64}(xx[1]), color = :red, markersize = 80)
+    fig1
+end
+fig
+Makie.save(outdir*"BMS2.png", fig)
+
 
 Manifolds.log(M, X.yy[1][1], X.yy[2][1])
 
@@ -83,61 +96,109 @@ QV_directional_frame(X)
 
 
 
-
-
-
-
-
-
-
-ax1, fig1 = sphere_figure()
-lines!(ax1, map(x -> x[1], xx), map(x -> x[2], xx) , map(x -> x[3], xx) ; linewidth = 2.0, color = palette(:default)[1])
-Label(fig1[1,1,Top()], "Brownian motion in 𝕊²")
-fig1
-Makie.save("BMS2.png", fig1)
-
-K = 50
-function κ(t, y , z, M::Manifolds.Sphere, B::AbstractBasis)
-    yp = Manifolds.get_point(M, B.A, B.i, y)
-    zp = Manifolds.get_point(M, B.A, B.i, z)
-    sum([ exp(-k*(k+1)*t/2)*(2*k+1)/(2*pi)*LegendrePolynomials.Pl(dot(yp,zp),k) for k in 0:1:K ])
+function linear_combination(θ, ϕ::Array{T, 1}) where {T<:Function}
+    K = typeof(θ) <: Real ? 1 : length(θ)
+    return x -> K == 1 ? θ*ϕ[1](x) : sum([θ[k]*ϕ[k](x) for k in 1:K])
 end
+ϕ1(a) = [1., 0.]
+ϕ2(a) = [0., 1.]
+Φ = [ϕ1, ϕ2]
+V(θ, Φ) = linear_combination(θ, Φ)
 
-T = 1.0
-xT = [0.0, 1.0,0.0]
 
-g(M::Manifolds.Sphere, B::AbstractBasis, t, a, xT) = κ(T-t, a, Manifolds.get_parameters(M,B.A,B.i, xT), M, B)
-
-function cometric(a, M, B::AbstractBasis)
-    u,v = a[1], a[2]
-    return 0.25*(1+u^2+v^2)*I
+# Illustration of the vector field
+θ₀ = [1.0,0.0]
+Manifolds.get_chart_index(M, A, [1.,0.,0.])
+fig = let
+    N = 20
+    θs, φs = LinRange(0.0, 2π, 2*N), LinRange(0.0, π, N)
+    pts = [Point3f0([sin(θ)*cos(φ), sin(θ)*sin(φ), cos(θ)]) for θ in θs, φ in φs]
+    pts_array = [reshape(pts, 2*N^2, 1)[i,1] for i in 1:2*N^2]
+    vecs_array = [zeros(3) for i in 1:2*N^2]
+    vecs = [reshape([V(θ₀./20, Φ)([θ, φ]) for θ in θs, φ in φs], 2*N^2, 1)[i,1] for i in 1:2*N^2]
+    for j in eachindex(vecs_array)
+        B = induced_basis(M, A, Manifolds.get_chart_index(M, A, pts[j]))
+        Manifolds.get_vector_induced_basis!(M, vecs_array[j], pts_array[j], vecs[j], B)
+        # vecs_array[j] = Point3f(vecs_array[j])
+    end
+    ax1, fig1 = sphere_figure()
+    arrows!(ax1, pts_array, Point3f0.(vecs_array) ; arrowsize = Vec3f0(0.04,0.04,0.04), linewidth=0.02, color=palette(:default)[1])
+    fig1
 end
-
-function ∇logg(M::Manifolds.Sphere, B::AbstractBasis, t, a, xT)
-    _∇ = ForwardDiff.gradient(a -> log(g(M, B, t, a, xT)), a)
-    g⁺ = cometric(a, M, B)
-    return g⁺*_∇
-end
+Makie.save(outdir*"vector_field_sphere.png", fig)
 
 
-T = 1.0
-tt = 0.0:0.001:T
+tt = 0.0:0.0001:1.0
+θ₀ = [3.0,0.0]
 W = Bridge.sample(tt, Wiener{SVector{2, Float64}}())
-drift(M,B,t,a) = ∇logg(M,B, t, a, xT)
+drift(M,B,t,a) = V(θ₀, Φ)(a)
 X = StochasticDevelopment(heun(), W, drift, (p, ν), M, A)
 xx = map(x -> x[1], X.yy)
 
-ax, fig = sphere_figure()
-lin = lines!(ax, map(x -> x[1], xx), map(x -> x[2], xx) , map(x -> x[3], xx) ; linewidth = 4.0, color = palette(:default)[1])
-x0_pt  = Makie.scatter!(ax, p[1],p[2],p[3], color = :red, markersize = 25, label = L"$x_0$")
-xT_pt = Makie.scatter!(ax, xT[1],xT[2],xT[3], color = :blue, markersize = 25, label = L"$x_T$")
-axislegend(ax;
-        labelsize = 50, 
-        framewidth = 1.0, 
-        orientation = :vertical,
-        patchlabelgap = 18,
-        patchsize = (50.0,50.0),
-        margin = (320.0,320.0,320.0,320.0))
+GLMakie.activate!()
+fig = let
+    ax1, fig1 = sphere_figure()
+    lines!(ax1, map(x -> x[1], xx), map(x -> x[2], xx) , map(x -> x[3], xx) ; linewidth = 2.0, color = palette(:default)[1])
+    Makie.scatter!(SVector{3, Float64}(xx[1]), color = :red, markersize = 80)
+    fig1
+end
+Makie.save(outdir*"vector_field_BM.png", fig)
+
+
+N = 30
+obs = xx[1:Int64(ceil(length(xx)/N)):length(xx)]
+fig = let
+    ax1, fig1 = sphere_figure()
+    Makie.scatter!(SVector{3, Float64}(obs[1]), color = :blue, markersize = 80)
+    for k in 2:N
+        Makie.scatter!(SVector{3, Float64}(obs[k]), color = :red, markersize = 80)
+    end
+    fig1
+end
+Makie.save(outdir*"vector_field_points.png", fig)
+
+σ = 0.2
+noisy_obs = deepcopy(obs)
+for (k,o) in enumerate(obs)
+    noisy_obs[k] = exp(M, o, (I - o*o')*σ*randn(3))
+end
+fig = let
+    ax1, fig1 = sphere_figure()
+    Makie.scatter!(SVector{3, Float64}(obs[1]), color = :blue, markersize = 80)
+    for k in 2:N
+        Makie.scatter!(SVector{3, Float64}(noisy_obs[k]), color = :blue, markersize = 80)
+    end
+    fig1
+end
+Makie.save(outdir*"vector_field_points_noise.png", fig)
+
+function Frame(x, M::Manifolds.Sphere)
+    N = Array{Float64}(x)
+    ν = nullspace(N')
+    return (x, ν)
+end
+
+T = 1.0
+xT = normalize(rand(3))
+obs = observation(T, Frame(xT,M))
+W = Bridge.sample(tt, Wiener{SVector{2, Float64}}())
+drift(M,B,t,a) = V(θ₀, Φ)(a) + ∇logg(M,B,t,a,obs)
+X = StochasticDevelopment(heun(), W, drift, (p, ν), M, A)
+xx = map(x -> x[1], X.yy)
+fig = let 
+    ax, fig1 = sphere_figure()
+    lines!(ax, map(x -> x[1], xx), map(x -> x[2], xx) , map(x -> x[3], xx) ; linewidth = 4.0, color = palette(:default)[1])
+    Makie.scatter!(ax, SVector{3,Float64}(p[1],p[2],p[3]), color = :red, markersize = 80, label = L"$x_0$")
+    Makie.scatter!(ax, SVector{3,Float64}(xT[1],xT[2],xT[3]), color = :blue, markersize = 80, label = L"$x_T$")
+    # axislegend(ax;
+    #     labelsize = 50, 
+    #     framewidth = 1.0, 
+    #     orientation = :vertical,
+    #     patchlabelgap = 18,
+    #     patchsize = (50.0,50.0),
+    #     margin = (320.0,320.0,320.0,320.0))
+    fig1
+end
 fig
 Makie.save("spherebridge.png", fig)
 
@@ -297,4 +358,7 @@ tt = 0.0:0.001:T
 drift(M,B,t,a) = φ♯∇logg(M,B, t, a, yT)
 Y = StochasticDevelopment(heun(), W, drift, (φ(M, Manifolds.Sphere(2), p), ν), M, A)
 yy2 = map(x -> x[1], X.yy)
+
+
+
 

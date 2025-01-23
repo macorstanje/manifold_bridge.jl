@@ -28,10 +28,11 @@ function Hor(i::Int64, u, M, B::AbstractBasis)
     # p = get_point(M, B.A, B.i, a)
     # Christoffel symbols, for the torus implemented above
     Γ = Manifolds.christoffel_symbols_second(M, a, B)
-    # Γ = christoffel_symbols_second(M, B, p)
     @einsum dY[k,m,i] :=  -Y[j,i]*Y[l,m]*Γ[k,j,l] # -Γ[i,k,l]*Y[k,m]*Y[l,j]
     return ( Y[:,i] ,  dY[:,:,i] )
 end
+
+
 
 function Hor(i::Int64, u, M::SymmetricPositiveDefinite, B::AbstractBasis)
     p, ν = u[1] , u[2]
@@ -42,6 +43,12 @@ function Hor(i::Int64, u, M::SymmetricPositiveDefinite, B::AbstractBasis)
     @einsum dζ[i,j,m] := -0.5*Γ[i,k,l]*ζ[k,m]*ζ[l,j]
     return (dp, get_vector(M,p, dζ[:,:,i], B))
 end
+
+function Hor(i::Int64, u, M::Euclidean)
+    a, Y = u[1],u[2]
+    return (Y[:,1], zero(Y))
+end
+
 
 abstract type SDESolver end
 struct heun <: SDESolver end
@@ -97,6 +104,13 @@ function IntegrateStep!(::heun, u, dZ, M::SymmetricPositiveDefinite, B::Abstract
     u
 end
 
+function IntegrateStep!(::heun, u, dZ, M::Euclidean)
+    a,Y = u[1],u[2]
+
+    a += sum([Y[:,i].*dZ[i] for i in eachindex(dZ)])
+    u = (a,Y)
+    u
+end
 
 import Base.getindex, Base.setindex!
 const .. = Val{:...}
@@ -177,7 +191,58 @@ function StochasticDevelopment!(::heun, Y::SamplePath, Z::SamplePath, drift::Fun
     Y
 end
 
+# Overwrite Y. 
+function StochasticDevelopment!(::heun, Y::SamplePath, Z::SamplePath, drift::Function, u₀, M::Hyperbolic)
 
+    N = length(Y)
+    N != length(Z) && error("Y and Z differ in length.")
+    tt = Z.tt
+    zz = Z.yy
+    yy = Y.yy
+
+    y::typeof(u₀) = u₀
+    for k in 1:N-1
+        yy[..,k]=y
+        p, ν = y[1], y[2]
+
+        # work within a chart
+        a, Y = get_frame_parameterized(p,ν, M)
+        # euclidean process increment dZt such that (dUt = Hi(Ut)∘dZt); In case of BM, this is just dW
+        dz = Y \ drift(M,tt[k],a)*(tt[k+1]-tt[k]) + zz[k+1] - zz[k]
+        # update the local coordinates
+        B = DefaultOrthonormalBasis()
+        a, Y = IntegrateStep!(heun(), (a,Y), dz, M, B)
+        # Map the result back to the ambient space
+        y = get_frame_vectors(a,Y,M)
+    end
+    yy[..,N] = y
+    Y
+end
+
+# Overwrite Y. 
+function StochasticDevelopment!(::heun, Y::SamplePath, Z::SamplePath, drift::Function, u₀, M::Euclidean)
+
+    N = length(Y)
+    N != length(Z) && error("Y and Z differ in length.")
+    tt = Z.tt
+    zz = Z.yy
+    yy = Y.yy
+
+    y::typeof(u₀) = u₀
+    for k in 1:N-1
+        yy[..,k]=y
+        a,Y = y[1], y[2]
+
+        # euclidean process increment dZt such that (dUt = Hi(Ut)∘dZt); In case of BM, this is just dW
+        dz = Y \ drift(M, tt[k], a)*(tt[k+1]-tt[k]) + zz[k+1] - zz[k]
+        # update the local coordinates
+        a, Y = IntegrateStep!(heun(), (a,Y), dz, M)
+        # Map the result back to the ambient space
+        y = (a,Y)
+    end
+    yy[..,N] = y
+    Y
+end
 
 function StochasticDevelopment!(::euler, Y::SamplePath, Z::SamplePath, drift::Function, u₀, M, A::AbstractAtlas)
 
@@ -208,10 +273,16 @@ function StochasticDevelopment!(::euler, Y::SamplePath, Z::SamplePath, drift::Fu
     Y
 end
 
-
-
 function StochasticDevelopment(method::SDESolver, Z,drift, u₀, M, A)
-    let X = Bridge.samplepath(Z.tt, deepcopy(u₀)); StochasticDevelopment!(method, X, Z, drift, u₀, M, A); X end
+    let X = samplepath(Z.tt, deepcopy(u₀)); StochasticDevelopment!(method, X, Z, drift, u₀, M, A); X end
+end
+
+function StochasticDevelopment(method::SDESolver, Z,drift, u₀, M::Euclidean)
+    let X = samplepath(Z.tt, deepcopy(u₀)); StochasticDevelopment!(method, X, Z, drift, u₀, M); X end
+end
+
+function StochasticDevelopment(method::SDESolver, Z,drift, u₀, M::Hyperbolic)
+    let X = samplepath(Z.tt, deepcopy(u₀)); StochasticDevelopment!(method, X, Z, drift, u₀, M); X end
 end
 
 function HorizontalDevelopment!(method::SDESolver, Y::SamplePath, Z::SamplePath, u₀, M, A::AbstractAtlas)
@@ -243,5 +314,5 @@ function HorizontalDevelopment!(method::SDESolver, Y::SamplePath, Z::SamplePath,
 end
 
 function HorizontalDevelopment(method::SDESolver, Z, u₀, M, A)
-    let X = Bridge.samplepath(Z.tt, deepcopy(u₀)); HorizontalDevelopment!(method, X, Z, u₀, M, A); X end
+    let X = samplepath(Z.tt, deepcopy(u₀)); HorizontalDevelopment!(method, X, Z, u₀, M, A); X end
 end

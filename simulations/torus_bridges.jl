@@ -1,5 +1,4 @@
 include("/Users/marc/Documents/GitHub/manifold_bridge.jl/src/manifold_bridge.jl")
-GLMakie.activate!()
 using Random
 using ProgressMeter
 outdir = "/Users/marc/Documents/Onderzoek/ManifoldGPs/"
@@ -9,21 +8,24 @@ Random.seed!(61)
     General forward simulation on the Torus
 """
 
-M = Manifolds.EmbeddedTorus(3,2)
+M = Manifolds.EmbeddedTorus(3,1)
 A = Manifolds.DefaultTorusAtlas()
 
+
 # Initial point
-x₀ = [3.0, 0.0, 2.0]
+x₀ = [3.0, 0.0, 1.0]
 # Place in an induced basis 
 i = Manifolds.get_chart_index(M, A, x₀)
 a₀ = Manifolds.get_parameters(M, A, i, x₀)
+i = (0.0, 0.0 )
 B = induced_basis(M,A,i)
 # Basis for tangent space to M at x₀
 N = Array{Float64}(Manifolds.normal_vector(M,x₀))
 ν = nullspace(N')
 
+get_frame_parameterized(x₀, ν, M, B)
 # Standard Brownian motion
-tt = 0.0:0.001:10.0
+tt = 0.0:0.001:1.0
 W = Bridge.sample(tt, Wiener{SVector{2, Float64}}())
 drift(M,B,t,a) = zero(a)
 X = StochasticDevelopment(heun(), W, drift, (x₀, ν) , M, A)
@@ -32,7 +34,7 @@ xx = map(x -> x[1], X.yy)
 GLMakie.activate!()
 fig = let
     ax, fig = torus_figure(M)
-    lines!(ax, map(x -> x[1], xx), map(x -> x[2], xx) , map(x -> x[3], xx) ; linewidth = 2.0, color = palette(:default)[1])
+    lines!(ax, map(x -> x[1], xx), map(x -> x[2], xx) , map(x -> x[3], xx) ; linewidth = 8.0, color = palette(:default)[1])
     fig
 end
 
@@ -76,7 +78,7 @@ end
 a₀ = Manifolds.get_parameters(M, B.A,B.i,x₀)
 # Simulation, conditioned to hit xT
 T = 1.0
-xT = [-3.0, 0.0,2.0]
+xT = [-3.0, 0.0,1.0]
 obs = observation(T, Frame(xT))
 
 tt = 0.0:0.001:T
@@ -100,17 +102,17 @@ fig = let
         lines!(ax, map(x -> x[1], samplepaths[k]), 
                     map(x -> x[2], samplepaths[k]) , 
                     map(x -> x[3], samplepaths[k]) ; 
-                    linewidth = 4.0, color = palette(:default)[k])
+                    linewidth = 4.0, color = palette(:oslo50)[5*k-1])
     end
-    Makie.scatter!(ax, x₀[1],x₀[2],x₀[3], color = :red, markersize = 25, label = L" $x_0$")
-    Makie.scatter!(ax, xT[1],xT[2],xT[3], color = :blue, markersize = 25, label = L" $x_T$")
-    axislegend(ax; 
-            labelsize = 50, 
-            framewidth = 1.0, 
-            orientation = :vertical,
-            patchlabelgap = 18,
-            patchsize = (50.0,50.0),
-            margin = (320.0,320.0,320.0,320.0))
+    Makie.scatter!(ax, SVector{3, Float64}(x₀[1],x₀[2],x₀[3]), color = :red, markersize = 55, label = L"$x_0$")
+    Makie.scatter!(ax, [xT[1],xT[2],xT[3]], color = :blue, markersize = 55, label = L"$x_T$")
+    # axislegend(ax; 
+    #         labelsize = 50, 
+    #         framewidth = 1.0, 
+    #         orientation = :vertical,
+    #         patchlabelgap = 18,
+    #         patchsize = (50.0,50.0),
+    #         margin = (320.0,320.0,320.0,320.0))
     fig
 end
 Makie.save(outdir*"standard_BB_no_vector_field.png", fig)
@@ -132,7 +134,7 @@ V(θ, Φ) = linear_combination(θ, Φ)
 
 
 # Illustration of the vector field
-θ₀ = [0.0,-4.0]
+θ₀ = [-4.0,4.0]
 fig = let
     N = 20
     θs, φs = LinRange(-π, π, N), LinRange(-π, π, N)
@@ -155,26 +157,51 @@ Makie.save(outdir*"vector_field_40.png", fig)
 T = 1.0
 tt = 0.0:0.001:T
 W = Bridge.sample(tt, Wiener{SVector{2, Float64}}())
+xT = X.yy[end][1]#[-3., 0., 2.]
 obs = observation(T, Frame(xT))
 drift(M,B,t,a) = V(θ₀, Φ)(a) .+ ∇logg(M,B,t,a,obs)
 X = StochasticDevelopment(heun(), W, drift, (x₀, ν), M, A)
+ll = loglikelihood(X, obs, θ₀, Φ, M, A)
+llvals = [ll]
 
-# multiple samplepaths
+
+# Crank nicolson scheme
+nr_simulations = 1000
 xx = map(x -> x[1], X.yy)
 samplepaths = [xx]
-for k in 1:10
-    W = Bridge.sample(tt, Wiener{SVector{2, Float64}}())
-    StochasticDevelopment!(heun(), X, W, drift, (x₀, ν), M, A)
+acc = [true]
+Xᵒ = deepcopy(X)
+prog = Progress(nr_simulations)
+for k in 1:nr_simulations
+    λ = .95
+    Wᵒ = crank_nicolson(λ, W)
+    StochasticDevelopment!(heun(), Xᵒ, Wᵒ, drift, (x₀, ν), M, A)
+    llᵒ = loglikelihood(Xᵒ, obs, θ₀, Φ, M, A)
+    llᵒ = isnan(llᵒ) ? -1e10 : llᵒ
+    if log(rand()) <= llᵒ - ll
+        push!(acc,true)
+        W = Wᵒ
+        X = Xᵒ
+        ll = llᵒ
+    else
+        push!(acc, false)
+    end
     push!(samplepaths, map(x -> x[1], X.yy))
+    push!(llvals, ll)
+    next!(prog)
 end
 
+accepted_samplepaths = samplepaths[acc]
+
+GLMakie.activate!()
 fig = let
+    nr_samplepaths_to_plot = acc[end]
     ax, fig = torus_figure(M)
-    for k in 1:10
-        lines!(ax, map(x -> x[1], samplepaths[k]), 
-                    map(x -> x[2], samplepaths[k]) , 
-                    map(x -> x[3], samplepaths[k]) ; 
-                    linewidth = 4.0, color = palette(:default)[k])
+    for k in 1:nr_samplepaths_to_plot
+        lines!(ax, map(x -> x[1], samplepaths[end-k+1]), 
+                    map(x -> x[2], samplepaths[end-k+1]) , 
+                    map(x -> x[3], samplepaths[end-k+1]) ; 
+                    linewidth = 4.0, color = palette(:oslo100)[max(1,Int64(floor(k*length(palette(:oslo100))/nr_samplepaths_to_plot)))])
     end
     Makie.scatter!(ax, x₀[1],x₀[2],x₀[3], color = :red, markersize = 25, label = L" $x_0$")
     Makie.scatter!(ax, xT[1],xT[2],xT[3], color = :blue, markersize = 25, label = L" $x_T$")
@@ -187,7 +214,7 @@ fig = let
             margin = (320.0,320.0,320.0,320.0))
     fig
 end
-Makie.save(outdir*"bridges_vector_field_0-4.png", fig)
+Makie.save(outdir*"bridges_vector_field_0-1.png", fig)
 
 
 
@@ -198,11 +225,12 @@ Makie.save(outdir*"bridges_vector_field_0-4.png", fig)
 """
 # Forward Trajectory
 T = 1.0
-tt = map((x) ->  x * (2-x/T) , 0.0:0.001:T)
-θ₀ = [2.0, 2.0]
+tt = map((x) ->  x * (1.7 + (1-1.7)*x/T) , 0.0:0.001:T)
+θ₀ = [-1, 0.1]
 drift(M,B,t,a) = V(θ₀, Φ)(a)
 W = sample(tt, Wiener{SVector{2, Float64}}())
 X = StochasticDevelopment(heun(), W, drift,(x₀,ν), M, A)
+xT = X.yy[end][1]
 
 GLMakie.activate!()
 fig = let
@@ -211,8 +239,8 @@ fig = let
             map(x -> x[1][2], X.yy) , 
             map(x -> x[1][3], X.yy) ; 
             linewidth = 4.0, color = palette(:default)[1])
-    Makie.scatter!(ax, x₀[1],x₀[2],x₀[3], color = :red, markersize = 25, label = L" $x_0$")
-    Makie.scatter!(ax, X.yy[end][1][1], X.yy[end][1][2], X.yy[end][1][3], color = :blue, markersize = 25, label = L" $x_T$")
+    Makie.scatter!(ax, Point3f0([x₀[1],x₀[2],x₀[3]]), color = :red, markersize = 25, label = L" $x_0$")
+    Makie.scatter!(ax, Point3f0([xT[1], xT[2], xT[3]]), color = :blue, markersize = 25, label = L" $x_T$")
     axislegend(ax; 
             labelsize = 50, 
             framewidth = 1.0, 
@@ -222,68 +250,161 @@ fig = let
             margin = (320.0,320.0,320.0,320.0))
     fig
 end
-Makie.save(outdir*"Forward_trajectory_22.png", fig)
+Makie.save(outdir*"Forward_trajectory_-11.png", fig)
 
 # Bridge to endpoint of forward observation
-xT = X.yy[end][1]
+xT = [-3.,0.,2.]
 obs = observation(T, Frame(xT))
 drift(M,B,t,a) = V(θ₀, Φ)(a)  .+ ∇logg(M,B,t,a,obs)
 W = sample(tt, Wiener{SVector{2, Float64}}())
 X = StochasticDevelopment(heun(), W, drift, (x₀, ν), M, A)
 Xᵒ = deepcopy(X)
 ll = loglikelihood(X, obs, θ₀, Φ, M, A)
+llvals = [ll]
 
 # Runs of the Crank-Nicolson scheme
 nr_simulations = 1000
 xx = map(x -> x[1], X.yy)
 samplepaths = [xx]
-acc = [0]
+acc = [1]
 prog = Progress(nr_simulations)
 for k in 1:nr_simulations
-    λ = .9
+    λ = 0.0
     Wᵒ = crank_nicolson(λ, W)
     StochasticDevelopment!(heun(), Xᵒ, Wᵒ, drift, (x₀, ν), M, A)
     llᵒ = loglikelihood(Xᵒ, obs, θ₀, Φ, M, A)
+    llᵒ = isnan(llᵒ) ? -1e10 : llᵒ
+    if isinf(llᵒ)
+        break
+    end
     if log(rand()) <= llᵒ - ll
-        push!(acc, acc[end] + 1)
+        push!(acc, 1) # push!(acc, acc[end] + 1)
         W = Wᵒ
         X = Xᵒ
         ll = llᵒ
-        push!(samplepaths, map(x -> x[1], X.yy))
     else
-        push!(acc, acc[end])
+        push!(acc, 0)
     end
+    push!(llvals , ll)
+    push!(samplepaths, map(x -> x[1], X.yy))
     next!(prog)
 end
+println("Terminated at $(length(acc)). Accepted percentage: $(100*mean(acc))%")
+accepted_samplepaths = samplepaths[2:end][map(x -> x == 1.0, acc)]
 
-# Plot of the behavior of the acceptance rate (should be increasing)
+# Plot of the behavior of the acceptance rate
 CairoMakie.activate!()
 fig = let 
+    acc_percentage = [100*cumsum(acc)[i]/i for i in eachindex(acc)]
     fig = Figure(resolution=(2000, 1000), size = (1200,1200),fontsize=35)
-    ax1 = Axis(fig[1, 1],xlabel = "Iteration", ylabel = "accepted proposals")
-    Makie.lines!(ax1, 1:nr_simulations, acc[2:end] ; linewidth = 3.0, color = palette(:default)[1])
+    ax1 = Axis(fig[1, 1],xlabel = "Iteration", ylabel = "percentage accepted proposals")
+    Makie.lines!(ax1, eachindex(acc), acc_percentage ; linewidth = 3.0, color = palette(:default)[1])
+    fig
+end
+
+fig = let 
+    fig = Figure(resolution=(2000, 1000), size = (1200,1200),fontsize=35)
+    ax1 = Axis(fig[1, 1],xlabel = "Iteration", ylabel = "log-likelihood")
+    Makie.lines!(ax1, eachindex(llvals), llvals ; linewidth = 3.0, color = palette(:default)[1])
     fig
 end
 
 GLMakie.activate!()
 fig = let
-    ax, fig = torus_figure(M)
-    for k in 1:6
-        lines!(ax, map(x -> x[1], samplepaths[end-k+1]), 
-                    map(x -> x[2], samplepaths[end-k+1]) , 
-                    map(x -> x[3], samplepaths[end-k+1]) ; 
-                    linewidth = 4.0, color = palette(:oslo100)[Int64(round(k*length( palette(:oslo100))/10))],
-        )# label = "Iteration $(length(samplepaths)-k+1)")
+    samplepaths_to_plot = length(samplepaths)-10:1:length(samplepaths)#map(i -> length(samplepaths)-i+1, 1:acc[end])
+    # samplepaths_to_plot = 1:1:10 #vcat(1:1:10 , length(samplepaths)-10:1:length(samplepaths))
+    ax, fig = torus_figure(M) 
+    cols = length(palette(:oslo))
+    for k in samplepaths_to_plot
+        col = palette(:oslo)[max(1, Int64(ceil(cols - k*cols/samplepaths_to_plot[end])))]
+        # col = palette(:oslo100)[max(1,length(palette(:oslo100)) - Int64(floor(k*length(palette(:oslo100))/length(samplepaths_to_plot))))]
+        lines!(ax, map(x -> x[1], samplepaths[k]), 
+                    map(x -> x[2], samplepaths[k]) , 
+                    map(x -> x[3], samplepaths[k]) ; 
+                    linewidth = 4.0, color = col)
     end
     Makie.scatter!(ax, x₀[1],x₀[2],x₀[3], color = :red, markersize = 25, label = L" $x_0$")
     Makie.scatter!(ax, xT[1],xT[2],xT[3], color = :blue, markersize = 25, label = L" $x_T$")
     axislegend(ax; 
-                labelsize = 50, 
-                framewidth = 1.0, 
-                orientation = :vertical,
-                patchlabelgap = 18,
-                patchsize = (50.0,50.0),
-                margin = (320.0,320.0,320.0,320.0))
+            labelsize = 50, 
+            framewidth = 1.0, 
+            orientation = :vertical,
+            patchlabelgap = 18,
+            patchsize = (50.0,50.0),
+            margin = (320.0,-160.0,320.0,320.0))
+    GLMakie.Colorbar(fig[1,2], colormap = Reverse(:oslo), height= Relative(0.3),width = 60, 
+            limits = (1, length(samplepaths)), label = "Iteration" )
+    #         label = "Iteration", width = 30, alignmode  = Outside(10))
     fig
 end
-Makie.save(outdir*"Bridges-drift_CN_after_forward_trajectory_22.png", fig)
+Makie.save(outdir*"Bridges-drift_CN_after_forward_trajectory_-11.png", fig)
+
+
+
+struct Deformed_Torus
+    R₁::Float64
+    R₂::Float64
+    r₁::Float64
+    r₂::Float64
+end
+
+
+function deformed_torus_figure(M::Deformed_Torus)
+    fig = Figure(resolution=(2000, 1600), size = (1200,1200), fontsize=46)
+    ax = LScene(fig[1, 1], show_axis=false)
+    ϴs, φs = LinRange(-π, π, 50), LinRange(-π, π, 50)
+    param_points = [[(M.R₁+M.r₁*cos(θ))*cos(φ), (M.R₂+M.r₁*cos(θ))*sin(φ), M.r₂*sin(θ)]  for θ in ϴs, φ in φs]
+    X1, Y1, Z1 = [[p[i] for p in param_points] for i in 1:3]
+    gcs = [gaussian_curvature(Manifolds.EmbeddedTorus(R,a), p) for p in param_points]
+    gcs_mm = max(abs(minimum(gcs)), abs(maximum(gcs)))
+    pltobj = Makie.surface!(
+        ax,
+        X1,
+        Y1,
+        Z1;
+        shading=true,
+        ambient=Vec3f(0.65, 0.65, 0.65),
+        backlight=1.0f0,
+        color=gcs,
+        colormap=Reverse(:RdBu),
+        colorrange=(-gcs_mm, gcs_mm),
+        transparency=true,
+    )
+    Makie.wireframe!(ax, X1, Y1, Z1; transparency=true, color=:gray, linewidth=0.5)
+    # zoom!(ax.scene, cameracontrols(ax.scene), 0.98)
+    #Colorbar(fig[1, 2], pltobj, height=Relative(0.5), label="Gaussian curvature")
+    return ax, fig
+end
+
+function ϕ(M::Manifolds.EmbeddedTorus, N::Deformed_Torus, x)
+    i = Manifolds.get_chart_index(M, A, x)
+    θ, φ = Manifolds.get_parameters(M, A, i, x)
+    sinθ, cosθ = sincos(θ + i[1])
+    sinφ, cosφ = sincos(φ + i[2])
+    return [(N.R₁ + N.r₁*cosθ)*cosφ , (N.R₂ + N.r₁*cosθ)*sinφ , N.r₂*sinθ]
+end
+
+
+N = Deformed_Torus(M.R, 5.0, 2.0, 1.0)
+xx = map(x -> x[1], X.yy)
+yy = map(x -> ϕ(M, N, x), xx)
+y₀ = ϕ(M, N, x₀)
+
+GLMakie.activate!()
+fig = let
+    ax, fig = deformed_torus_figure(N)
+    lines!(ax, map(x -> x[1], yy), 
+            map(x -> x[2], yy) , 
+            map(x -> x[3], yy) ; 
+            linewidth = 4.0, color = palette(:default)[1])
+    Makie.scatter!(ax, y₀[1],y₀[2],y₀[3], color = :red, markersize = 25, label = L" $x_0$")
+    Makie.scatter!(ax, yy[end][1], yy[end][2], yy[end][3], color = :blue, markersize = 25, label = L" $x_T$")
+    axislegend(ax; 
+            labelsize = 50, 
+            framewidth = 1.0, 
+            orientation = :vertical,
+            patchlabelgap = 18,
+            patchsize = (50.0,50.0),
+            margin = (320.0,320.0,320.0,320.0))
+    fig
+end
