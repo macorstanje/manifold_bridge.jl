@@ -1,7 +1,9 @@
 include("/Users/marc/Documents/GitHub/manifold_bridge.jl/src/manifold_bridge.jl")
 using Random
-using DelimitedFiles
+using ProgressMeter
+using StaticArrays
 using Plots
+using DelimitedFiles
 outdir = "/Users/marc/Documents/Onderzoek/ManifoldGPs/"
 Random.seed!(61)
 
@@ -65,16 +67,29 @@ drift(M,t,a) = [0.0, 0.0]
 U = StochasticDevelopment(heun(), W, drift, (x₀,ν₀), M)
 xx = map(u -> u[1], U.yy) ; νν = map(u -> u[2], U.yy)
 aa = map(x -> convert(PoincareBallPoint, x).value, xx)
+writedlm(outdir*"trajectory.csv", aa, ',')
+
+samplepaths = [xx]
+for i in 1:5
+    W = sample(tt, Wiener{SVector{2,Float64}}())
+    U = StochasticDevelopment(heun(), W, drift, (x₀,ν₀), M)
+    push!(samplepaths, map(u -> u[1], U.yy))
+end
 
 CairoMakie.activate!()
 fig = let
     f = Figure()
     Axis(f[1,1])
     arc!(Point2f(0), 1, -π, π, color = :red)
-    Makie.lines!(map(x -> x[1], aa), map(x -> x[2], aa))
+    for (i,xx) in enumerate(samplepaths)
+        aa = map(x -> convert(PoincareBallPoint, x).value, xx)
+        Makie.lines!(map(x -> x[1], aa), map(x -> x[2], aa), color = color = palette(:default)[i])
+    end
+    Makie.scatter!(a₀[1], a₀[2], markersize = 20, color = "red")
     f
 end
 display(fig)
+Makie.save(outdir*"forward_paths_hyperbolic.png", fig)
 
 GLMakie.activate!()
 fig = let 
@@ -85,28 +100,33 @@ end
 display(fig)
 
 """
-    Bridge Simulation
+    Brownian bridge Bridge Simulation
 """
-ρs = 0.0:0.001:10.0
-grid = gridρΔ(ρs,tt)
-fill_grid!(grid, 10000, (ρ,t) -> ρ+2*sqrt(t))
+# ρs = 0.0:0.001:5.0
+# grid = gridρΔ(ρs,tt)
+# fill_grid!(grid, 10000, (ρ,t) -> ρ+2*sqrt(t))
 
-writedlm(outdir*"hyperbolic_grid_filled_v2.csv",grid.grid_vals,',')
+# using DelimitedFiles
+# writedlm(outdir*"hyperbolic_grid_filled_v5.csv",grid.grid_vals,',')
+# grid.grid_vals = readdlm(outdir*"hyperbolic_grid_filled_v3.csv", ',')
 
+# Simulating Brownian motion
+W = sample(tt, Wiener{SVector{2, Float64}}())
+drift(M,t,a) = zero(a)
+X = StochasticDevelopment(heun(), W, drift, (x₀, ν₀) , M)
+xx = map(x -> x[1], X.yy) # global coordinates
+aa = map(x -> convert(PoincareBallPoint, x).value, xx) # local coordinates
+
+# Select the end point of the forward trajectory as end point
 xT = xx[end]; νT = νν[end]
 aT, YT = get_frame_parameterized(xT, νT, M)
 obs = observation(T, (xT, νT))
 drift(M,t,a) = ∇logg(M, t, a, grid, obs)
 
-W = sample(tt, Wiener{SVector{2, Float64}}())
-U = StochasticDevelopment(heun(), W, drift, (x₀,ν₀), M)
-xx = map(u -> u[1], U.yy)
-aa = map(x -> convert(PoincareBallPoint, x).value, xx)
-
 CairoMakie.activate!()
 fig = let
-    f = Figure(resolution=(800, 800), size = (1200,1200), fontsize=20)
-    ax = Axis(f[1,1])
+    fig = Figure()
+    ax = Axis(fig[1, 1], yautolimitmargin = (0.1, 0.1), xautolimitmargin = (0.1, 0.1))
     arc!(Point2f(0), 1, -π, π, color = :red)
     Makie.lines!(map(x -> x[1], aa), map(x -> x[2], aa), color = color = palette(:default)[1])
     Makie.scatter!(a₀[1],a₀[2], color = :red, label = L"$x_0$", markersize = 20)
@@ -119,7 +139,6 @@ fig = let
         patchsize = (40.0,40.0),
         margin = (32.0,32.0,32.0,32.0))
     fig
-    f
 end
 Makie.save(outdir*"bridge_poincare_disk2.png", fig)
 
@@ -144,7 +163,7 @@ Makie.save(outdir*"bridge_hyperbolic2.png", fig)
 """
     With a drift
 """
-V(a) = -5*a
+V(a) = 5*a
 
 CairoMakie.activate!()
 fig = let
@@ -174,16 +193,18 @@ U = StochasticDevelopment(heun(), W, drift, (x₀,ν₀), M)
 xx = map(u -> u[1], U.yy) ; νν = map(u -> u[2], U.yy)
 aa = map(x -> convert(PoincareBallPoint, x).value, xx)
 
-xT = xx[end]; νT = νν[end]
+#xT = xx[end]; νT = νν[end]
+xT = [x₀[1], -x₀[2], x₀[3]] 
+νT = [-ν₀[1,1] ν₀[1,2] ; ν₀[2,1] -ν₀[2,2] ; ν₀[3,1] -ν₀[3,2]]
 aT, YT = get_frame_parameterized(xT, νT, M)
 obs = observation(T, (xT, νT))
 
 CairoMakie.activate!()
 fig = let
-    f = Figure(resolution=(800, 800), size = (1200,1200), fontsize=20)
-    ax = Axis(f[1,1])
+    fig = Figure()
+    ax = Axis(fig[1, 1], yautolimitmargin = (0.1, 0.1), xautolimitmargin = (0.1, 0.1))
     arc!(Point2f(0), 1, -π, π, color = :red)
-    Makie.lines!(map(x -> x[1], aa), map(x -> x[2], aa), color = color = palette(:default)[1])
+    Makie.lines!(map(x -> x[1], aa), map(x -> x[2], aa), color = palette(:default)[1])
     Makie.scatter!(a₀[1],a₀[2], color = :red, label = L"$x_0$", markersize = 20)
     Makie.scatter!(aT[1], aT[2], color = :blue, label = L"$x_T$", markersize = 20)
     axislegend(ax; 
@@ -194,13 +215,12 @@ fig = let
         patchsize = (40.0,40.0),
         margin = (32.0,32.0,32.0,32.0))
     fig
-    f
 end
 display(fig)
 # Makie.save(outdir*"bridge_poincare_disk.png", fig)
 
 GLMakie.activate!()
-fig = let 
+fig = let
     ax, fig = hyperboloid_figure(M)
     Makie.lines!(map(x -> x[1], xx),map(x -> x[2], xx),map(x -> x[3], xx), color = palette(:default)[1])
     Makie.scatter!(x₀[1],x₀[2],x₀[3], color = :red, label = L"$x_0$", markersize = 20)
@@ -218,21 +238,58 @@ display(fig)
 # Makie.save(outdir*"bridge_hyperbolic.png", fig)
 
 
+"""
+    Use this part for bridge simulaton with a vector field!
+"""
+# Select the opposing point as end point
+xT = [x₀[1], -x₀[2], x₀[3]] 
+νT = [-ν₀[1,1] ν₀[1,2] ; ν₀[2,1] -ν₀[2,2] ; ν₀[3,1] -ν₀[3,2]]
+aT, YT = get_frame_parameterized(xT, νT, M)
+obs = observation(T, (xT, νT))
 
-# Bridge simulation
 
+V(a) = -20*a
 W = sample(tt, Wiener{SVector{2,Float64}}())
-drift(M,t,a) = V(a) + ∇logg(M,t,a,grid,obs)
+Z = randn(5000)
+Zpos = Z[Z.>-2]
+drift(M,t,a) = V(a) + ∇logg(M,t,a,obs, Zpos)
 U = StochasticDevelopment(heun(), W, drift, (x₀,ν₀), M)
 xx = map(u -> u[1], U.yy) ; νν = map(u -> u[2], U.yy)
 aa = map(x -> convert(PoincareBallPoint, x).value, xx)
 
+guiding_term = [∇logg(M,U.tt[i],aa[i],obs, Zpos) for i in 1:length(aa)-1]
+distan = [dist(M, a, convert(PoincareBallPoint, HyperboloidPoint(obs.u[1])).value) for a in aa]
+
+# Plot the guiding term
+CairoMakie.activate!()
+fig = let 
+    fig = Figure()
+    ax = Axis(fig[1, 1], yautolimitmargin = (0.1, 0.1), xautolimitmargin = (0.1, 0.1))
+    Makie.lines!(U.tt[1:end-1], map(a -> a[1], guiding_term), label = L"$\nabla \log g_1$")
+    Makie.lines!(U.tt[1:end-1], map(a -> a[2], guiding_term), label = L"$\nabla \log g_2$")
+    axislegend(ax; labelsize = 25, patchsize = (50.0,30.0), position = :rb)
+    fig
+end
+Makie.save(outdir*"guiding_term.png", fig)
+
+# Plot the distance from X_t to x_T
+CairoMakie.activate!()
+fig = let 
+    fig = Figure()
+    ax = Axis(fig[1, 1], yautolimitmargin = (0.1, 0.1), xautolimitmargin = (0.1, 0.1))
+    Makie.lines!(U.tt, distan, label = L"$\rho$")
+    ax.xlabel = "t"
+    ax.ylabel = L"$\rho$"
+    fig
+end
+
+# Plot the process in the poincaredisk
 CairoMakie.activate!()
 fig = let
-    f = Figure(resolution=(800, 800), size = (1200,1200), fontsize=20)
-    ax = Axis(f[1,1])
+    fig = Figure()
+    ax = Axis(fig[1, 1], yautolimitmargin = (0.1, 0.1), xautolimitmargin = (0.1, 0.1))
     arc!(Point2f(0), 1, -π, π, color = :red)
-    Makie.lines!(map(x -> x[1], aa), map(x -> x[2], aa), color = color = palette(:default)[1])
+    Makie.lines!(map(x -> x[1], aa[1:end-3]), map(x -> x[2], aa[1:end-3]), color = color = palette(:default)[1])
     Makie.scatter!(a₀[1],a₀[2], color = :red, label = L"$x_0$", markersize = 20)
     Makie.scatter!(aT[1], aT[2], color = :blue, label = L"$x_T$", markersize = 20)
     axislegend(ax; 
@@ -243,13 +300,12 @@ fig = let
         patchsize = (40.0,40.0),
         margin = (32.0,32.0,32.0,32.0))
     fig
-    f
 end
-display(fig)
-Makie.save(outdir*"bridge_drift_poincare_disk2.png", fig)
 
+
+# Plot the process on on an hyperboloid
 GLMakie.activate!()
-fig = let 
+fig = let
     ax, fig = hyperboloid_figure(M)
     Makie.lines!(map(x -> x[1], xx),map(x -> x[2], xx),map(x -> x[3], xx), color = palette(:default)[1])
     Makie.scatter!(x₀[1],x₀[2],x₀[3], color = :red, label = L"$x_0$", markersize = 20)
@@ -265,3 +321,101 @@ fig = let
 end
 display(fig)
 Makie.save(outdir*"bridge_drift_hyperbolic2.png", fig)
+
+
+# Crank nicolson scheme
+X = deepcopy(U)
+nr_simulations = 50
+xx = map(x -> x[1], X.yy)
+samplepaths = [xx]
+acc = [true]
+Xᵒ = deepcopy(X)
+ll = loglikelihood(Xᵒ, obs, M, Zpos)
+llvals = [ll]
+prog = Progress(nr_simulations)
+for k in 1:nr_simulations
+    λ = .95
+    Wᵒ = crank_nicolson(λ, W)
+    StochasticDevelopment!(heun(), Xᵒ, Wᵒ, drift, (x₀, ν₀), M)
+    llᵒ = loglikelihood(Xᵒ, obs, M, Zpos)
+    llᵒ = isnan(llᵒ) ? -1e10 : llᵒ
+    if log(rand()) <= llᵒ - ll
+        push!(acc,true)
+        W = Wᵒ
+        X = Xᵒ
+        ll = llᵒ
+    else
+        push!(acc, false)
+    end
+    push!(samplepaths, map(x -> x[1], X.yy))
+    push!(llvals, ll)
+    next!(prog)
+end
+
+# Plot 5 accepted samplepaths (evenly spread) on poicare disk
+CairoMakie.activate!()
+fig = let
+    fig = Figure()
+    ax = Axis(fig[1, 1], yautolimitmargin = (0.1, 0.1), xautolimitmargin = (0.1, 0.1))
+    arc!(Point2f(0), 1, -π, π, color = :red)
+    accepted_samplepaths = samplepaths[acc]
+    samplepaths_to_plot = accepted_samplepaths[[Int(ceil(0.2*k*sum(acc))) for k in 1:5]]
+    for (i,xx) in enumerate(samplepaths_to_plot)
+        aa = map(x -> convert(PoincareBallPoint, x).value, xx)
+        Makie.lines!(map(x -> x[1], aa), map(x -> x[2], aa), color = color = palette(:oslo50)[1+10*(i-1)])
+    end
+    Makie.scatter!(a₀[1],a₀[2], color = :red, label = L"$x_0$", markersize = 20)
+    Makie.scatter!(aT[1], aT[2], color = :blue, label = L"$x_T$", markersize = 20)
+    axislegend(ax; 
+        labelsize = 35, 
+        framewidth = 1.0, 
+        orientation = :vertical,
+        patchlabelgap = 10,
+        patchsize = (40.0,40.0),
+        margin = (32.0,32.0,32.0,32.0))
+    fig
+end
+Makie.save(outdir*"bridge_drift_hyperbolic3_no_field.png", fig)
+
+# Plot 5 accepted samplepaths (evenly spread) on hyperboloid
+GLMakie.activate!()
+fig = let
+    ax, fig = hyperboloid_figure(M)
+    accepted_samplepaths = samplepaths[acc]
+    samplepaths_to_plot = accepted_samplepaths[[Int(ceil(0.2*k*sum(acc))) for k in 1:5]]
+    for (i,xx) in enumerate(samplepaths_to_plot)
+        Makie.lines!(map(x -> x[1], xx),map(x -> x[2], xx),map(x -> x[3], xx), color =  palette(:oslo50)[1+10*(i-1)])
+    end
+    Makie.scatter!(x₀[1],x₀[2],x₀[3], color = :red, label = L"$x_0$", markersize = 20)
+    Makie.scatter!(xT[1], xT[2],xT[3], color = :blue, label = L"$x_T$", markersize = 20)
+    axislegend(ax; 
+        labelsize = 50, 
+        framewidth = 1.0, 
+        orientation = :vertical,
+        patchlabelgap = 18,
+        patchsize = (50.0,50.0),
+        margin = (152.0,152.0,152.0,152.0))
+    fig
+end
+display(fig)
+Makie.save(outdir*"bridge_drift_hyperbolic4.png", fig)
+
+# Make a traceplot of the endpoint
+CairoMakie.activate!()
+fig = let 
+    fig = Figure()
+    ax = Axis(fig[1, 1], yautolimitmargin = (0.1, 0.1), xautolimitmargin = (0.1, 0.1))
+    accepted_samplepaths = samplepaths[acc]
+    ind = Int(ceil(1.0*length(X.tt))) # or select another index here
+    aa = []
+    for xx in accepted_samplepaths
+        push!(aa, convert(PoincareBallPoint, xx[ind]).value)
+    end
+    Makie.lines!(1:sum(acc) , map(a -> a[1], aa), label = L"$a_1$")
+    Makie.lines!(1:sum(acc) , map(a -> a[2], aa), label = L"$a_2$")
+    Makie.hlines!(aT[1], linewidth = 1)
+    Makie.hlines!(aT[2], linewidth = 1)
+    axislegend(ax; labelsize = 25, patchsize = (50.0,30.0), position = :lt)
+    fig
+end
+Makie.save(outdir*"trace_plot_no_field_end_point.png", fig)

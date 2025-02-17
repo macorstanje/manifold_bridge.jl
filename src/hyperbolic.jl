@@ -23,6 +23,8 @@ function Manifolds.local_metric(M::Manifolds.Hyperbolic, a::Vector{Float64})
     return 4/(1-dot(a,a))^2 
 end
 
+local_inner_product(M::Hyperbolic, a::Vector{Float64}, X, Y) = sqrt(X'*local_metric(M,a)*Y)
+
 Manifolds.local_metric(M::Hyperbolic, a::Manifolds.PoincareBallPoint) = local_metric(M, a.value)
 
 import Manifolds.christoffel_symbols_second
@@ -42,8 +44,6 @@ function logκ(t,x,y, M::Hyperbolic)
     ρ = distance(M,x,y)
     ζs = sqrt(t).*randn(5000)
     vars = [ζ > ρ ? ζ / sqrt(cosh(ζ) - cosh(ρ)) : 0.0 for ζ in ζs]
-    dump(sum([z > ρ for z in ζs]))
-    dump(ρ)
     return log(mean(vars))
 end
 
@@ -54,7 +54,6 @@ end
 function ∇logg(M::Hyperbolic, t, a, obs::observation)
     inv(local_metric(M,a))*ForwardDiff.gradient(a -> logg_param(M, t, a, obs), a)
 end
-
 
 # Compute heat kernel when a grid is filled
 """
@@ -70,6 +69,9 @@ mutable struct gridρΔ
     gridρΔ(ρ,Δ) = new(ρ,Δ)
 end
 
+
+
+# Fills grid with E[..]
 function fill_grid!(grid::gridρΔ, N, μ::Function)
     grid.grid_vals = zeros(length(grid.ρ), length(grid.Δ))
     p = Progress(length(grid.ρ)*length(grid.Δ))
@@ -77,8 +79,8 @@ function fill_grid!(grid::gridρΔ, N, μ::Function)
     for (i,ρ) in enumerate(grid.ρ)
         for (j,δ) in enumerate(grid.Δ)
             ζs = μ(ρ,δ) .+ sqrt(δ).*Z
-            vars = [ζ > ρ ? ζ*exp(-μ(ρ,δ)*ζ/δ) / sqrt(cosh(ζ) - cosh(ρ)) : 0.0 for ζ in ζs]
-            grid.grid_vals[i,j] = log(mean(vars))
+            vars = [ζ > ρ ? ζ*exp((-μ(ρ,δ)*ζ)/δ ) / sqrt(cosh(ζ) - cosh(ρ)) : 0.0 for ζ in ζs]
+            grid.grid_vals[i,j] = mean(vars)
             next!(p)
         end
     end
@@ -93,10 +95,16 @@ function linear_interpolation_1d(x,f,x₁,x₂)
     return ((x₂-x)*f[1] + (x-x₁)*f[2])/(x₁-x₂)
 end
 
-function logκ(t, x, y, grid::gridρΔ, M::Hyperbolic)
+function κ(t, x, y, grid::gridρΔ, M::Hyperbolic)
     ρ = distance(M,x,y)
     indρ = searchsortedfirst(grid.ρ, ρ)   
     indΔ = searchsortedfirst(grid.Δ, t)
+    if indρ <= 1
+        return Inf
+    end
+    if indΔ <= 1
+        return 0
+    end
     if indρ == length(grid.ρ) + 1
         if indΔ == length(grid.Δ) + 1
             return grid.grid_vals[end,end]
@@ -113,12 +121,41 @@ function logκ(t, x, y, grid::gridρΔ, M::Hyperbolic)
         end
     end
 end
+logκ(t, x, y, grid::gridρΔ, M::Hyperbolic) = log(κ(t, x, y, grid, M))
 
-δ(a,b) = 2*dot(a-b,a-b)/((1-dot(a,a))*(1-dot(b,b)))
+δ(a,b)= 2*dot(a-b,a-b)/((1-dot(a,a))*(1-dot(b,b)))
 dist(M::Hyperbolic,a,b) = acosh(1+δ(a,b))
 ∇dist(M,a,b) = inv(local_metric(M,a))*ForwardDiff.gradient(a -> dist(M,a,b), a)
 
-function ∇logg(M::Hyperbolic, t, a, grid::gridρΔ, obs::observation)
+f(ζ, ρ) = ζ/sqrt(cosh(ζ)-cosh(ρ))
+function E(M,t,a,obs::observation, Zpos)
+    ρ = dist(M,a, convert(PoincareBallPoint, obs.u[1]).value)
+    τ = obs.t - t
+    μ = ρ+2*sqrt(τ)
+    out = zero(eltype(a))
+    for Zi in Zpos
+        Z = μ + sqrt(τ)*Zi
+        out += f(Z, ρ)*exp(-μ*Zi/sqrt(τ))
+    end
+    return out
+end
+
+function ∇logE(M,t,a,obs::observation,Zpos)
+    return ForwardDiff.gradient(a ->E(M,t,a,obs,Zpos), a)/E(M,t,a,obs,Zpos)
+end 
+
+function log_g1(M,t,a, obs)
+    aT = convert(PoincareBallPoint, obs.u[1]).value
+    ρ =  dist(M,a, aT) 
+    τ = obs.t - t
+    μ = ρ + 2*sqrt(τ)
+    -0.5*μ^2/τ
+end
+
+∇logg(M,t,a,obs::observation, Zpos) = inv(local_metric(M,a))*(∇logE(M,t,a,obs,Zpos) + ForwardDiff.gradient(a ->log_g1(M,t,a, obs), a))
+
+
+function ∇logg(M::Hyperbolic, t, a, grid::gridρΔ, obs::observation, )
     Δ = obs.t - t ; 
     x = convert(HyperboloidPoint, PoincareBallPoint(a)).value
     ρ = distance(M,x,obs.u[1])
@@ -131,14 +168,15 @@ function ∇logg(M::Hyperbolic, t, a, grid::gridρΔ, obs::observation)
             if grid.grid_vals[indρ-1,indΔ] == -Inf
                 return zeros(2)
             else
-                dρ = (grid.grid_vals[indρ, indΔ] - grid.grid_vals[indρ-1, indΔ])/(grid.ρ[indρ]-grid.ρ[indρ-1])
+                dρ = (grid.grid_vals[indρ, indΔ] - grid.grid_vals[indρ-1, indΔ])/(grid.grid_vals[indρ, indΔ]*(grid.ρ[indρ]-grid.ρ[indρ-1]))
             end
         else
             return zeros(2)
         end
     end
     aT = convert(PoincareBallPoint, HyperboloidPoint(obs.u[1])).value
-    return dρ*∇dist(M,a,aT)
+    ρ = dist(M,a,aT)
+    return ∇dist(M,a,aT)*(dρ +ρ*(ρ/sqrt(obs.t-t)+2))#/κ(obs.t - t, x, obs.u[1], grid, M)
 end
 
 # function logg_param(M::Hyperbolic, t, a, grid::gridρΔ, obs::observation)

@@ -46,7 +46,7 @@ end
 
 function Hor(i::Int64, u, M::Euclidean)
     a, Y = u[1],u[2]
-    return (Y[:,1], zero(Y))
+    return (Y[:,i], zero(Y))
 end
 
 

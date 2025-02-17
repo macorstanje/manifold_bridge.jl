@@ -93,7 +93,7 @@ function hyperboloid_figure(M::Hyperbolic)
     fig = Figure(resolution=(1200, 800), size = (1200,1200), fontsize=46)
     ax = LScene(fig[1, 1], show_axis=false)
     # us, vs = LinRange(-1,1, 50), LinRange(-1,1, 50)
-    rs, ϕs = LinRange(0,0.8,50), LinRange(-π,π,50)
+    rs, ϕs = LinRange(0,0.8,10), LinRange(-π,π,50)
     aa = [[r*cos(ϕ), r*sin(ϕ)] for r in rs, ϕ in ϕs]
     xx = [convert(HyperboloidPoint, PoincareBallPoint(a)).value for a in aa]
     # pts =  [ [sinh(u)*cosh(v) , sinh(v), cosh(u)*cosh(v)] for u in us, v in vs ]

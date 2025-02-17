@@ -48,28 +48,33 @@ function getk(times::Array{T,1}, t::T) where {T<:Real}
     return k
 end
 
-# function ϕlogg(M, A, xT, ϕ)
-#     function out(t,x)
-#         i = Manifolds.get_chart_index(M, A, x)
-#         a = get_parameters(M, A, i, x)
-#         _∇ = ForwardDiff.gradient(a -> log(g_param(M, induced_basis(M,A,i) ,t, a , xT)), a)
-#         # out = zeros(3)
-#         # Manifolds.get_vector_induced_basis!(M, out , x , dot(grad, ϕ(a)) , induced_basis(M, A, i) )
-#         return dot(_∇, ϕ(a))
-#     end
-#     return out
-# end
+function loglikelihood(X::SamplePath, obs::observation , grid::gridρΔ, M::Hyperbolic) 
+    a = convert(PoincareBallPoint, HyperboloidPoint(X.yy[1][1])).value
 
-# function μ(M,A,X, xT, Φ)
-#     μ = zeros(length(Φ))
-#     for i in eachindex(Φ)
-#         for k in 1:length(X.tt)-1
-#             # println("tt = $(X.tt[k]) , μ = $(μ[i]), x = $(X.yy[k][1]), xT = $xT")
-#             μ[i] += ϕlogg( M,A, xT, Φ[i] )(tt[k] , X.yy[k][1])*(X.tt[k+1] - X.tt[k])
-#         end
-#     end
-#     return μ
-# end
+    out = logκ(X.tt[end], X.yy[1][1], obs.u[1], grid, M) # log g(0,x₀)
+    for k in 1:length(X.tt)-1
+        t, x = X.tt[k], X.yy[k][1] # tₖ, xₖ
+        a = convert(PoincareBallPoint, HyperboloidPoint(x)).value
+
+        _∇ = ∇logg(M, t, a, grid, obs)
+        out += dot( V(a) , _∇ )*( X.tt[k+1] - t )
+    end
+    return out
+end
+
+function loglikelihood(X::SamplePath, obs::observation , M::Hyperbolic, Zpos) 
+    a = convert(PoincareBallPoint, HyperboloidPoint(X.yy[1][1])).value
+out = 0.0
+    #out = logκ(X.tt[end], X.yy[1][1], obs.u[1], grid, M) # log g(0,x₀)
+    for k in 1:length(X.tt)-1
+        t, x = X.tt[k], X.yy[k][1] # tₖ, xₖ
+        a = convert(PoincareBallPoint, HyperboloidPoint(x)).value
+
+        _∇ = ∇logg(M, t, a, obs, Zpos)
+        out += dot( V(a) , _∇ )*( X.tt[k+1] - t )
+    end
+    return out
+end
 
 function μΓ(M, A, X, Φ::Array{T,1}) where {T<:Function}
     μ = zeros(length(Φ))
