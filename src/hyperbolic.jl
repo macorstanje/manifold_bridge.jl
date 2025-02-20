@@ -23,7 +23,7 @@ function Manifolds.local_metric(M::Manifolds.Hyperbolic, a::Vector{Float64})
     return 4/(1-dot(a,a))^2 
 end
 
-local_inner_product(M::Hyperbolic, a::Vector{Float64}, X, Y) = sqrt(X'*local_metric(M,a)*Y)
+local_inner_product(M::Hyperbolic, a::Vector{Float64}, X, Y) = local_metric(M,a)*dot(X,Y)
 
 Manifolds.local_metric(M::Hyperbolic, a::Manifolds.PoincareBallPoint) = local_metric(M, a.value)
 

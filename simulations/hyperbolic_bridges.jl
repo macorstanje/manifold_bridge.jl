@@ -40,24 +40,6 @@ end
 @assert is_local_orthonormal(M,a₀,Y₀) "Initial frame not locally orthonormal"
 @assert is_minkowski_orthonormal(M,x₀,ν₀) "Initial frame not minkowski orthonormal"
 
-"""
-    Simulating Brownian motion in local coordinates using the Laplace Beltrami operator
-
-W = sample(tt, Wiener{SVector{2,Float64}}())
-A = [a₀]
-for i in 1:length(tt)-1
-    push!(A, A[end] + 0.5*(1-dot(A[end],A[end]))*(W.yy[i+1] .- W.yy[i]) )
-end
-
-CairoMakie.activate!()
-fig = let
-    f = Figure()
-    Axis(f[1,1])
-    arc!(Point2f(0), 1, -π, π, color = :red)
-    Makie.lines!(map(x -> x[1], A), map(x -> x[2], A))
-    f
-end
-"""
 
 """
     Simulation of Brownian motion using stochastic HorizontalDevelopment
@@ -102,14 +84,6 @@ display(fig)
 """
     Brownian bridge Bridge Simulation
 """
-# ρs = 0.0:0.001:5.0
-# grid = gridρΔ(ρs,tt)
-# fill_grid!(grid, 10000, (ρ,t) -> ρ+2*sqrt(t))
-
-# using DelimitedFiles
-# writedlm(outdir*"hyperbolic_grid_filled_v5.csv",grid.grid_vals,',')
-# grid.grid_vals = readdlm(outdir*"hyperbolic_grid_filled_v3.csv", ',')
-
 # Simulating Brownian motion
 W = sample(tt, Wiener{SVector{2, Float64}}())
 drift(M,t,a) = zero(a)
@@ -121,8 +95,12 @@ aa = map(x -> convert(PoincareBallPoint, x).value, xx) # local coordinates
 xT = xx[end]; νT = νν[end]
 aT, YT = get_frame_parameterized(xT, νT, M)
 obs = observation(T, (xT, νT))
-drift(M,t,a) = ∇logg(M, t, a, grid, obs)
 
+Z = randn(5000)
+Zpos = Z[Z.>-2]
+drift(M,t,a) = ∇logg(M, t, a, obs, Zpos)
+
+# Figure on Poincare disk
 CairoMakie.activate!()
 fig = let
     fig = Figure()
@@ -142,6 +120,7 @@ fig = let
 end
 Makie.save(outdir*"bridge_poincare_disk2.png", fig)
 
+# Figure on hyperboloid
 GLMakie.activate!()
 fig = let 
     ax, fig = hyperboloid_figure(M)
@@ -163,32 +142,25 @@ Makie.save(outdir*"bridge_hyperbolic2.png", fig)
 """
     With a drift
 """
-V(a) = 5*a
-
+# Visualization of the drift
+V(θ) = (a) -> 0.3*[θ*(1-dot(a,a)), 0] # Scale down by 0.3 for reasonable visualization
 CairoMakie.activate!()
 fig = let
-    f = Figure(resolution=(800, 800), size = (1200,1200), fontsize=20)
+    f = Figure(resolution=(900, 800), size = (1200,1200), fontsize=20)
     ax = Axis(f[1,1])
     pts = [0.85 .* [cos(φ), sin(φ)] for φ ∈ range(0,2π,length=11)]
     arc!(Point2f(0), 1, -π, π, color = :red)
     Makie.scatter!(ax, map(p -> p[1], pts), map(p -> p[2], pts), markersize = 15)
     Makie.arrows!(ax, map(p -> p[1], pts),map(p -> p[2], pts),
                             map(p -> V(p)[1], pts),map(p -> V(p)[2], pts) , color = palette(:default)[2])
-    # axislegend(ax; 
-    #     labelsize = 35, 
-    #     framewidth = 1.0, 
-    #     orientation = :vertical,
-    #     patchlabelgap = 10,
-    #     patchsize = (40.0,40.0),
-    #     margin = (32.0,32.0,32.0,32.0))
     fig
     f
 end
-Makie.save(outdir*"vector_field_hyperbolic.png", fig)
+Makie.save(outdir*"vector_field_hyperbolic_righ2t.png", fig)
 
-
+# Forward simulation
 W = sample(tt, Wiener{SVector{2,Float64}}())
-drift(M,t,a) = V(a)
+drift(M,t,a) = V(5)(a)
 U = StochasticDevelopment(heun(), W, drift, (x₀,ν₀), M)
 xx = map(u -> u[1], U.yy) ; νν = map(u -> u[2], U.yy)
 aa = map(x -> convert(PoincareBallPoint, x).value, xx)
@@ -242,21 +214,25 @@ display(fig)
     Use this part for bridge simulaton with a vector field!
 """
 # Select the opposing point as end point
+a₀ = [0.6,0.0]
+Y₀ = (1-dot(a₀,a₀))/2*[1 0 ; 0 1]
+x₀, ν₀ = get_frame_vectors(a₀,Y₀,M)
+
+
 xT = [x₀[1], -x₀[2], x₀[3]] 
 νT = [-ν₀[1,1] ν₀[1,2] ; ν₀[2,1] -ν₀[2,2] ; ν₀[3,1] -ν₀[3,2]]
 aT, YT = get_frame_parameterized(xT, νT, M)
 obs = observation(T, (xT, νT))
 
-
-V(a) = -20*a
+# Inward pointing vector field
+V(θ)(a) = θ*a
 W = sample(tt, Wiener{SVector{2,Float64}}())
-Z = randn(5000)
-Zpos = Z[Z.>-2]
-drift(M,t,a) = V(a) + ∇logg(M,t,a,obs, Zpos)
+drift(M,t,a) = V(-15)(a) + ∇logg(M,t,a,obs, Zpos)
 U = StochasticDevelopment(heun(), W, drift, (x₀,ν₀), M)
 xx = map(u -> u[1], U.yy) ; νν = map(u -> u[2], U.yy)
 aa = map(x -> convert(PoincareBallPoint, x).value, xx)
 
+# Visualizing the guiding term and distance to end point along the path
 guiding_term = [∇logg(M,U.tt[i],aa[i],obs, Zpos) for i in 1:length(aa)-1]
 distan = [dist(M, a, convert(PoincareBallPoint, HyperboloidPoint(obs.u[1])).value) for a in aa]
 

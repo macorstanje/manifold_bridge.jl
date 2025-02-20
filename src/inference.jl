@@ -62,15 +62,29 @@ function loglikelihood(X::SamplePath, obs::observation , grid::gridρΔ, M::Hype
     return out
 end
 
-function loglikelihood(X::SamplePath, obs::observation , M::Hyperbolic, Zpos) 
-    a = convert(PoincareBallPoint, HyperboloidPoint(X.yy[1][1])).value
-out = 0.0
+function loglikelihood(X::SamplePath, obs::observation , V::Function, M::Hyperbolic, Zpos) 
+    # a = convert(PoincareBallPoint, HyperboloidPoint(X.yy[1][1])).value
+    out = 0.0
     #out = logκ(X.tt[end], X.yy[1][1], obs.u[1], grid, M) # log g(0,x₀)
     for k in 1:length(X.tt)-1
         t, x = X.tt[k], X.yy[k][1] # tₖ, xₖ
         a = convert(PoincareBallPoint, HyperboloidPoint(x)).value
 
         _∇ = ∇logg(M, t, a, obs, Zpos)
+        out += dot( V(a) , _∇ )*( X.tt[k+1] - t )
+    end
+    return out
+end
+
+function loglikelihood(X::SamplePath, obs::Array{observation, 1}, V::Function, M::Hyperbolic, Zpos)
+    times = map(o -> o.t, obs)
+    # a = convert(PoincareBallPoint, HyperboloidPoint(X.yy[1][1])).value
+    out = 0.0 # log(g_param(M, B, X.tt[1] , a, obs[getk(times, X.tt[1])] )) # log g(0,x₀)
+    for k in 1:length(X.tt)-1
+        t, x = X.tt[k], X.yy[k][1] # tₖ, xₖ
+        a = convert(PoincareBallPoint, HyperboloidPoint(x)).value
+
+        _∇ = ∇logg(M, t, a, obs[getk(times, t)], Zpos) 
         out += dot( V(a) , _∇ )*( X.tt[k+1] - t )
     end
     return out
@@ -95,6 +109,19 @@ function μΓ(M, A, X, Φ::Array{T,1}) where {T<:Function}
                 # Γ[k,ℓ] += dot(Y\Φ[k](a) , Y\Φ[ℓ](a))*(X.tt[j+1] - X.tt[j])
             end
         end
+    end
+    return μ, Γ
+end
+
+function μΓ(M::Hyperbolic, X, V::T) where {T<:Function}
+    μ = 0.0 ; Γ = 0.0
+    for j in 1:length(X.tt)-1
+        x, ν = X.yy[j]
+        a, Y = get_frame_parameterized(x, ν, M)
+        dx = log(M, X.yy[j][1], X.yy[j+1][1])
+        da = convert(PoincareBallTVector, HyperboloidPoint(x), HyperboloidTVector(dx)).value
+        μ += local_inner_product(M, a, V(1)(a) , da)
+        Γ += local_inner_product(M, a, V(1)(a), V(1)(a))*( X.tt[j+1] - X.tt[j] )
     end
     return μ, Γ
 end

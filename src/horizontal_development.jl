@@ -161,6 +161,35 @@ function StochasticAntiDevelopment(U::SamplePath, drift::Function, M, A::Abstrac
     let X = sample(U.tt, Wiener{SVector{manifold_dimension(M), Float64}}()); StochasticAntiDevelopment!(X, U, drift, M, A); X end
 end
 
+# Overwrite Y
+function StochasticAntiDevelopment!(Y::SamplePath, U::SamplePath, drift::Function, M::Hyperbolic)
+    N = length(U)
+    N != length(Y) && error("U and Y differ in length.")
+    tt = Y.tt
+    yy = Y.yy
+    uu = U.yy
+
+    y = zeros(manifold_dimension(M))
+    for k in 1:N-1
+        yy[..,k] = y
+        p, ν = uu[k][1], uu[k][2]
+        a, u = get_frame_parameterized(p,ν, M)
+        dx = HyperboloidTVector(log(M, uu[k][1], uu[k+1][1]))
+        dx = convert(PoincareBallTVector, HyperboloidPoint(p), dx).value
+        # Manifolds.get_coordinates_induced_basis!(M, a, p, dx, B)
+        dy = u \ ( dx - drift(M,tt[k],a)*(tt[k+1]-tt[k]))
+        y += dy
+        # Manifolds.get_coordinats_induced_basis!(M, z, p, dz, B)
+        # println(y)
+    end
+    yy[..,N] = y
+    Y
+end
+
+function StochasticAntiDevelopment(U::SamplePath, drift::Function, M::Hyperbolic)
+    let X = sample(U.tt, Wiener{SVector{manifold_dimension(M), Float64}}()); StochasticAntiDevelopment!(X, U, drift, M); X end
+end
+
 # Overwrite Y. 
 function StochasticDevelopment!(::heun, Y::SamplePath, Z::SamplePath, drift::Function, u₀, M, A::AbstractAtlas)
 
